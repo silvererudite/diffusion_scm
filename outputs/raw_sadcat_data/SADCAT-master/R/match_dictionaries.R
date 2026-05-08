@@ -1,0 +1,469 @@
+#' @title Match Text Against SADCAT and/or SOCATS Dictionaries
+#'
+#' @description Match text responses against SADCAT stereotype dictionaries
+#' and/or SOCATS social category dictionaries. Tokenizes response text,
+#' matches against dictionaries, and computes binary indicators, percentages,
+#' direction scores, and per-dimension valence/direction columns.
+#' @param data A data.frame with preprocessed text and valence scores
+#' @param text_col Column with singularized text to match (default "tv3")
+#' @param response_col Column used for NA-gating (default: same as text_col).
+#'   Only needed if your NA-indicator column differs from text_col.
+#' @param valence_col Name of NA-gated combined valence column (default "ValenceYesNA")
+#' @param valence_nona_col Name of zero-imputed combined valence column (default "ValenceNoNA")
+#' @param sadcat_dict Pre-computed SADCAT quanteda dictionary. If NULL and
+#'   \code{sadcat = TRUE} (default), calls \code{prepare_sadcat_dictionaries()}.
+#'   Set to FALSE to skip SADCAT matching entirely.
+#' @param socats_dict Pre-computed SOCATS quanteda dictionary. If NULL and
+#'   \code{socats = TRUE}, calls \code{prepare_socats_dictionaries()}.
+#' @param socats Logical. Match against SOCATS dictionaries? (default FALSE)
+#' @param keep_intermediate Logical. If \code{FALSE} (default), return compact
+#'   SADCAT outputs with informative names: \code{{Dim}_prevalence},
+#'   \code{{Dim}_valence}, \code{{Dim}_direction}, \code{{Dim}_valenceNoNA},
+#'   \code{{Dim}_directionNoNA}, and \code{NoMatch}. If \code{TRUE}, keep
+#'   legacy SADCAT intermediate columns as well.
+#' @return The input data with dictionary-derived columns appended. By default,
+#'   SADCAT outputs are compact. For each SADCAT dimension \code{\{Dim\}}, three
+#'   valence columns are produced:
+#'   \itemize{
+#'     \item \code{\{Dim\}_Valence} (default for downstream means): NA when the
+#'       dimension is not tagged in the response; otherwise the global
+#'       \code{ValenceNoNA} (0 if no sentiment words matched, else the signed
+#'       negation-aware mean). Use \code{mean(., na.rm = TRUE)} to get the
+#'       average valence among tagged responses, where sentiment-less tagged
+#'       responses contribute 0.
+#'     \item \code{\{Dim\}_valenceStrictNA}: NA whenever either the dimension is
+#'       not tagged OR the global \code{ValenceYesNA} is itself NA. Strictly
+#'       NA-gated on both axes.
+#'     \item \code{\{Dim\}_valenceNoNA}: 0 whenever either the dimension is not
+#'       tagged OR the global sentiment is NA. Strictly zero-imputed on both
+#'       axes; interpretable as a prevalence-weighted valence over the full
+#'       response set.
+#'   }
+#' @export match_dictionaries
+
+match_dictionaries <- function(data,
+                               text_col = "tv3",
+                               response_col = NULL,
+                               valence_col = "ValenceYesNA",
+                               valence_nona_col = "ValenceNoNA",
+                               sadcat_dict = NULL,
+                               socats_dict = NULL,
+                               socats = FALSE,
+                               keep_intermediate = FALSE) {
+  if (is.null(response_col)) response_col <- text_col
+  message("--- Stage 4: Matching dictionaries ---")
+  .require_data_columns(data, text_col, "match_dictionaries()")
+  .require_data_columns(data, response_col, "match_dictionaries()")
+
+  # Determine which dictionaries to match
+  do_sadcat <- !identical(sadcat_dict, FALSE)
+  do_socats <- socats || !is.null(socats_dict)
+
+  # Get or prepare SADCAT dictionaries
+  if (do_sadcat && is.null(sadcat_dict)) {
+    sadcat_dict <- prepare_sadcat_dictionaries()
+  }
+
+  # Get or prepare SOCATS dictionaries
+  if (do_socats && is.null(socats_dict)) {
+    socats_dict <- prepare_socats_dictionaries()
+  }
+
+  # ---- Deduplicate for expensive operations ----
+  texts <- data[[text_col]]
+  uniq_mask <- !duplicated(texts)
+  uniq_texts <- texts[uniq_mask]
+  map_idx <- match(texts, uniq_texts)
+  n_uniq <- length(uniq_texts)
+  n_total <- nrow(data)
+
+  if (n_uniq < n_total) {
+    message("  Deduplicating: ", n_total, " rows -> ", n_uniq, " unique texts")
+  }
+
+  # ---- Prepare text for matching (tv3 -> tv4) on unique texts only ----
+  delete_ending_Ss2_internal <- function(x) {
+    if (is.na(x)) return(x)
+    unlist(lapply(x, function(y) {
+      paste(sapply(strsplit(y, ' '), delete_ending_Ss), collapse = ' ')
+    }))
+  }
+
+  uniq_tv4 <- enc2utf8(as.character(uniq_texts))
+  uniq_tv4 <- tolower(uniq_tv4)
+  uniq_tv4 <- gsub("-", " ", uniq_tv4)
+  uniq_tv4 <- vapply(uniq_tv4, delete_ending_Ss2_internal, character(1), USE.NAMES = FALSE)
+
+  # Map tv4 back to full data (needed for drop step)
+  data$tv4 <- uniq_tv4[map_idx]
+
+  # ---- Tokenize unique texts (shared for both dictionaries) ----
+  toks <- .tokenize_quanteda_text(uniq_tv4,
+                                  prefix = "response",
+                                  remove_numbers = FALSE,
+                                  remove_punct = TRUE,
+                                  remove_symbols = TRUE)
+
+  toks_dict <- data
+  sadcat_dict_cols <- character(0)
+
+  # ============================================================
+  # SADCAT MATCHING
+  # ============================================================
+  if (do_sadcat) {
+    message("  Matching SADCAT dictionaries...")
+
+    toks_dict_pre <- quanteda::tokens_lookup(toks, dictionary = sadcat_dict,
+                                             nested_scope = "dictionary",
+                                             exclusive = TRUE, levels = 1)
+    uniq_dict_df <- quanteda::convert(quanteda::dfm(toks_dict_pre), to = "data.frame")
+    uniq_dict_df$doc_id <- NULL
+    uniq_dict_df$ntoken <- quanteda::ntoken(toks)
+
+    # Map unique results back to full data
+    toks_dict_df <- uniq_dict_df[map_idx, , drop = FALSE]
+    rownames(toks_dict_df) <- NULL
+    toks_dict <- cbind(toks_dict_df, toks_dict)
+
+    # Identify SADCAT dictionary column names (quanteda lowercases them)
+    dict_cols_all <- tolower(names(sadcat_dict))
+    sadcat_dict_cols <- dict_cols_all
+
+    # ---- Percentages ----
+    for (col in dict_cols_all) {
+      toks_dict[[paste0(col, "_percent")]] <- toks_dict[[col]] / toks_dict$ntoken
+    }
+
+    # ---- Binary indicators ----
+    for (col in dict_cols_all) {
+      toks_dict[[paste0(col, "_binary")]] <- ifelse(toks_dict[[col]] > 0, 1, 0)
+    }
+
+    # ---- Direction scores (hi - lo for directional dimensions) ----
+    for (dim in .SADCAT_DIR_DIMS) {
+      hi_col <- paste0(tolower(dim), "_dic_hi_binary")
+      lo_col <- paste0(tolower(dim), "_dic_lo_binary")
+      dirx_col <- paste0(dim, "_dirx")
+      if (hi_col %in% names(toks_dict) && lo_col %in% names(toks_dict)) {
+        toks_dict[[dirx_col]] <- toks_dict[[hi_col]] - toks_dict[[lo_col]]
+      }
+    }
+
+    # ---- Binary2: NA if response is NA ----
+    all_base_dims <- c(.SADCAT_DIR_DIMS, .SADCAT_NDIR_DIMS)
+    for (dim in all_base_dims) {
+      binary_col <- paste0(tolower(dim), "_dic_binary")
+      binary2_col <- paste0(tolower(dim), "_dic_binary2")
+      if (binary_col %in% names(toks_dict)) {
+        toks_dict[[binary2_col]] <- ifelse(is.na(toks_dict[[response_col]]),
+                                           NA, toks_dict[[binary_col]])
+      }
+    }
+
+    # ---- None2y: no dictionary match ----
+    binary2_cols <- grep("_dic_binary2$", names(toks_dict), value = TRUE)
+    if (length(binary2_cols) > 0) {
+      row_sums <- rowSums(toks_dict[, binary2_cols, drop = FALSE], na.rm = FALSE)
+      toks_dict$None2y <- ifelse(is.na(row_sums), NA, ifelse(row_sums > 0, 0, 1))
+    }
+
+    # ---- Per-dimension Valy / ValyNoNA / _Valence (new default) ----
+    # Valy: NA if dimension prevalence is 0          (feeds _valenceStrictNA)
+    # ValyNoNA: 0 if dimension prevalence is 0       (feeds _valenceNoNA)
+    # _Valence: NA if binary==0; else ValenceNoNA    (new default column)
+    for (dim in all_base_dims) {
+      binary_col <- paste0(tolower(dim), "_dic_binary")
+      valy_dim <- paste0(dim, "_Valy")
+      valynona_dim <- paste0(dim, "_ValyNoNA")
+      valence_dim <- paste0(dim, "_Valence")
+
+      if (binary_col %in% names(toks_dict) && valence_col %in% names(toks_dict)) {
+        toks_dict[[valy_dim]] <- ifelse(toks_dict[[binary_col]] == 0,
+                                        NA, toks_dict[[valence_col]])
+      }
+      if (binary_col %in% names(toks_dict) && valence_nona_col %in% names(toks_dict)) {
+        toks_dict[[valynona_dim]] <- ifelse(toks_dict[[binary_col]] == 0,
+                                            0, toks_dict[[valence_nona_col]])
+        toks_dict[[valence_dim]] <- ifelse(toks_dict[[binary_col]] == 0,
+                                           NA, toks_dict[[valence_nona_col]])
+      }
+    }
+
+    # NONE Valy
+    if ("None2y" %in% names(toks_dict) && valence_col %in% names(toks_dict)) {
+      toks_dict$NONE_Valy <- ifelse(toks_dict$None2y == 0, NA, toks_dict[[valence_col]])
+    }
+
+    uniq_adjusted_dir <- .compute_adjusted_direction_scores(uniq_texts, sadcat_dict)
+    for (col in names(uniq_adjusted_dir)) {
+      toks_dict[[col]] <- uniq_adjusted_dir[map_idx, col]
+    }
+
+    # ---- valy3/valyNoNA3 and dirx3 ----
+    # valy3/dirx3: NA if binary==0 OR binary2 is NA
+    # valyNoNA3/dirx3NoNA: NA only if binary2 is NA (keeps 0 when dim is absent)
+    # Directional dimensions: valy3, valyNoNA3, dirx3, dirx3NoNA
+    for (dim in .SADCAT_DIR_DIMS) {
+      binary_col <- paste0(tolower(dim), "_dic_binary")
+      binary2_col <- paste0(tolower(dim), "_dic_binary2")
+      valy_dim <- paste0(dim, "_Valy")
+      valynona_dim <- paste0(dim, "_ValyNoNA")
+      valy3_col <- paste0(dim, "_valy3")
+      valynona3_col <- paste0(dim, "_valyNoNA3")
+      dirx_col <- paste0(dim, "_dirx")
+      dirx2_col <- paste0(dim, "_dirx2")
+      dirx3_col <- paste0(dim, "_dirx3")
+      dirx3nona_col <- paste0(dim, "_dirx3NoNA")
+
+      if (all(c(binary_col, binary2_col, valy_dim) %in% names(toks_dict))) {
+        toks_dict[[valy3_col]] <- ifelse(
+          toks_dict[[binary_col]] == 0 | is.na(toks_dict[[binary2_col]]),
+          NA, toks_dict[[valy_dim]])
+      }
+      if (all(c(binary_col, binary2_col, valynona_dim) %in% names(toks_dict))) {
+        toks_dict[[valynona3_col]] <- ifelse(
+          is.na(toks_dict[[binary2_col]]),
+          NA, toks_dict[[valynona_dim]]
+        )
+      }
+      if (all(c(binary_col, binary2_col, dirx_col) %in% names(toks_dict))) {
+        toks_dict[[dirx3_col]] <- ifelse(
+          toks_dict[[binary_col]] == 0 | is.na(toks_dict[[binary2_col]]),
+          NA, toks_dict[[dirx_col]])
+        toks_dict[[dirx3nona_col]] <- ifelse(
+          is.na(toks_dict[[binary2_col]]),
+          NA,
+          ifelse(toks_dict[[binary_col]] == 0, 0, toks_dict[[dirx_col]])
+        )
+      }
+    }
+
+    # Non-directional dimensions: valy3 and valyNoNA3
+    ndir_for_valy3 <- c("Occupation", "Emotion", "Deviance", "Socialgroups",
+                         "Geography", "Appearance", "Other", "OtherwFam")
+    for (dim in ndir_for_valy3) {
+      binary_col <- paste0(tolower(dim), "_dic_binary")
+      binary2_col <- paste0(tolower(dim), "_dic_binary2")
+      valy_dim <- paste0(dim, "_Valy")
+      valynona_dim <- paste0(dim, "_ValyNoNA")
+      valy3_col <- paste0(dim, "_valy3")
+      valynona3_col <- paste0(dim, "_valyNoNA3")
+
+      if (all(c(binary_col, binary2_col, valy_dim) %in% names(toks_dict))) {
+        toks_dict[[valy3_col]] <- ifelse(
+          toks_dict[[binary_col]] == 0 | is.na(toks_dict[[binary2_col]]),
+          NA, toks_dict[[valy_dim]])
+      }
+      if (all(c(binary_col, binary2_col, valynona_dim) %in% names(toks_dict))) {
+        toks_dict[[valynona3_col]] <- ifelse(
+          is.na(toks_dict[[binary2_col]]),
+          NA, toks_dict[[valynona_dim]]
+        )
+      }
+    }
+
+    message("  SADCAT matching complete.")
+  }
+
+  # ============================================================
+  # SOCATS MATCHING
+  # ============================================================
+  if (do_socats) {
+    message("  Matching SOCATS dictionaries...")
+    socats_existing_cols <- names(toks_dict)
+
+    toks_socats_pre <- quanteda::tokens_lookup(toks, dictionary = socats_dict,
+                                               nested_scope = "dictionary",
+                                               exclusive = TRUE, levels = 1)
+    uniq_socats_df <- quanteda::convert(quanteda::dfm(toks_socats_pre), to = "data.frame")
+    uniq_socats_df$doc_id <- NULL
+
+    # Add token counts if not already present from SADCAT matching
+    if (!"ntoken" %in% names(toks_dict)) {
+      uniq_socats_df$ntoken_socats <- quanteda::ntoken(toks)
+    }
+
+    # Map unique results back to full data
+    toks_socats_df <- uniq_socats_df[map_idx, , drop = FALSE]
+    rownames(toks_socats_df) <- NULL
+    toks_dict <- cbind(toks_dict, toks_socats_df)
+
+    # Identify SOCATS dictionary column names (quanteda lowercases them)
+    socats_cols <- tolower(names(socats_dict))
+
+    # ---- Assume numbers are ages ----
+    if ("age_dic" %in% names(toks_dict)) {
+      toks_dict$age_dic <- ifelse(grepl("\\d", toks_dict[[response_col]]),
+                                   1, toks_dict$age_dic)
+    }
+
+    # ---- Binary indicators ----
+    for (col in socats_cols) {
+      toks_dict[[paste0(col, "_binary")]] <- ifelse(toks_dict[[col]] > 0, 1, 0)
+    }
+
+    # ---- SOCATS direction indicators (custom logic) ----
+    toks_dict <- compute_socats_directions(toks_dict)
+
+    # Ensure SOCATS-derived columns are NA when response is missing
+    socats_added_cols <- setdiff(names(toks_dict), socats_existing_cols)
+    toks_dict <- .mask_missing_response_cols(
+      toks_dict,
+      response_col,
+      cols_or_patterns = socats_added_cols
+    )
+
+    message("  SOCATS matching complete.")
+  }
+
+  if (do_sadcat) {
+    toks_dict <- .add_compact_sadcat_columns(toks_dict)
+  }
+
+  # Ensure dictionary-derived valence/direction families are NA when response is missing
+  toks_dict <- .mask_missing_response_cols(
+    toks_dict,
+    response_col,
+    cols_or_patterns = c(
+      "_Valy$", "_ValyNoNA$", "_valy3$", "_valyNoNA3$",
+      "_Valence$",
+      "_dirx$", "_dirx2$", "_dirx3$", "_dirx3NoNA$",
+      "_prevalence$", "_valenceStrictNA$", "_valenceNoNA$",
+      "_direction$", "_directionNoNA$", "^NoMatch$"
+    )
+  )
+
+  if (do_sadcat) {
+    if (!isTRUE(keep_intermediate)) {
+      toks_dict <- .drop_sadcat_intermediate_columns(toks_dict, sadcat_dict_cols)
+    }
+  }
+
+  # Replace NaN with NA
+  toks_dict <- replace_nan_with_na(toks_dict)
+
+  message("  Dictionary matching complete.")
+  return(toks_dict)
+}
+
+.add_compact_sadcat_columns <- function(data) {
+  all_base_dims <- c(.SADCAT_DIR_DIMS, .SADCAT_NDIR_DIMS)
+
+  for (dim in all_base_dims) {
+    prevalence_old <- paste0(tolower(dim), "_dic_binary2")
+    if (prevalence_old %in% names(data)) {
+      data[[paste0(dim, "_prevalence")]] <- data[[prevalence_old]]
+    }
+
+    valence_old <- paste0(dim, "_valy3")
+    if (valence_old %in% names(data)) {
+      data[[paste0(dim, "_valenceStrictNA")]] <- data[[valence_old]]
+    }
+
+    valence_nona_old <- paste0(dim, "_valyNoNA3")
+    if (valence_nona_old %in% names(data)) {
+      data[[paste0(dim, "_valenceNoNA")]] <- data[[valence_nona_old]]
+    }
+  }
+
+  for (dim in .SADCAT_DIR_DIMS) {
+    direction_old <- paste0(dim, "_dirx3")
+    if (direction_old %in% names(data)) {
+      data[[paste0(dim, "_direction")]] <- data[[direction_old]]
+    }
+
+    direction_nona_old <- paste0(dim, "_dirx3NoNA")
+    if (direction_nona_old %in% names(data)) {
+      data[[paste0(dim, "_directionNoNA")]] <- data[[direction_nona_old]]
+    }
+  }
+
+  if ("None2y" %in% names(data)) {
+    data$NoMatch <- data$None2y
+  }
+
+  data
+}
+
+.drop_sadcat_intermediate_columns <- function(data, dict_cols_all) {
+  all_base_dims <- c(.SADCAT_DIR_DIMS, .SADCAT_NDIR_DIMS)
+
+  dictionary_family_cols <- unique(c(
+    dict_cols_all,
+    paste0(dict_cols_all, "_percent"),
+    paste0(dict_cols_all, "_binary")
+  ))
+
+  dimension_family_cols <- unique(c(
+    paste0(tolower(all_base_dims), "_dic_binary2"),
+    paste0(all_base_dims, "_Valy"),
+    paste0(all_base_dims, "_ValyNoNA"),
+    paste0(all_base_dims, "_valy3"),
+    paste0(all_base_dims, "_valyNoNA3"),
+    paste0(.SADCAT_DIR_DIMS, "_dirx"),
+    paste0(.SADCAT_DIR_DIMS, "_dirx2"),
+    paste0(.SADCAT_DIR_DIMS, "_dirx3"),
+    paste0(.SADCAT_DIR_DIMS, "_dirx3NoNA")
+  ))
+
+  helper_cols <- c("None2y", "NONE_Valy", "ntoken", "tv4")
+  drop_cols <- unique(c(dictionary_family_cols, dimension_family_cols, helper_cols))
+  drop_cols <- intersect(drop_cols, names(data))
+
+  if (length(drop_cols) > 0) {
+    data <- data[, setdiff(names(data), drop_cols), drop = FALSE]
+  }
+
+  data
+}
+
+
+#' Compute SOCATS-specific direction indicators
+#' @param data Data frame with SOCATS binary columns
+#' @return Data frame with direction columns added
+#' @keywords internal
+compute_socats_directions <- function(data) {
+  # Age direction: ordinal (1=children, 2=teenager, 3=adult, 4=elderly)
+  if (all(c("children_dic", "teenager_dic", "adult_dic", "elderly_dic") %in% names(data))) {
+    data$Age_dir <- ifelse(data$children_dic > 0, 1,
+                    ifelse(data$teenager_dic > 0, 2,
+                    ifelse(data$adult_dic > 0, 3,
+                    ifelse(data$elderly_dic > 0, 4, NA))))
+  }
+
+  # Race/Geography status direction: high - low
+  hi_col <- "race.geo.us.hi.status_dic_binary"
+  lo_col <- "race.geo.us.lo.status_dic_binary"
+  if (all(c(hi_col, lo_col) %in% names(data))) {
+    data$RaceGeo_dir <- data[[hi_col]] - data[[lo_col]]
+  }
+
+  # Sexual orientation direction: -1=majority, +1=minority/other
+  maj_col <- "sexualor.majority_dic"
+  min_col <- "sexualor.minority_dic"
+  oth_col <- "other_sexorgenderid_dic"
+  if (all(c(maj_col, min_col, oth_col) %in% names(data))) {
+    data$SexualOr_dir <- ifelse(data[[maj_col]] > 0, -1,
+                         ifelse(data[[min_col]] > 0 | data[[oth_col]] > 0, 1, NA))
+  }
+
+  # Gender direction: Women vs Men (-1=men, +1=women)
+  if (all(c("men_dic", "women_dic") %in% names(data))) {
+    data$Gender_dir.WvM <- ifelse(data$men_dic > 0, -1,
+                           ifelse(data$women_dic > 0, 1, NA))
+  }
+
+  # Gender direction: Cis vs not (+1=cis, -1=trans/nonbinary/other)
+  cis_col <- "cis_dic"
+  trans_col <- "trans_dic"
+  other_g_col <- "other.gender.id.express_dic"
+  nb_col <- "nonbinary.mix.ambiguous.gender_dic"
+  if (all(c(cis_col, trans_col, other_g_col, nb_col) %in% names(data))) {
+    data$Gender_dir.Cisvnot <- ifelse(data[[cis_col]] > 0, 1,
+                               ifelse(data[[trans_col]] > 0 |
+                                      data[[other_g_col]] > 0 |
+                                      data[[nb_col]] > 0, -1, NA))
+  }
+
+  return(data)
+}
