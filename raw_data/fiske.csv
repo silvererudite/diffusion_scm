@@ -1,0 +1,7 @@
+category,kind,source,scale_max,warmth_mean,competence_mean,n_raters,table_reference,rating_type,notes
+rich people,identity_group,Fiske2002,5,2.48,4.34,~571,"Table 12, Study 3",raw,5 samples combined
+feminists,identity_group,Fiske2002,5,2.75,3.69,~571,"Table 12, Study 3",raw,5 samples combined
+black professionals,identity_group,Fiske2002,5,3.37,3.83,~571,"Table 12, Study 3",raw,5 samples combined
+elderly people,identity_group,Fiske2002,5,4.06,2.74,~571,"Table 12, Study 3",raw,"5 samples combined; one sample used 'retarded' instead — see footnote"
+housewives,identity_group,Fiske2002,5,3.94,3.06,~571,"Table 12, Study 3",raw,5 samples combined
+welfare recipients,identity_group,Fiske2002,5,2.42,1.86,~571,"Table 12, Study 3",raw,5 samples combined
