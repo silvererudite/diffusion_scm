@@ -1,0 +1,22 @@
+{
+  "probe_A": {
+    "encoder": "CLIP-L image + CLIP-L text axes",
+    "r_warmth": 0.005367056725566921,
+    "p_warmth": 0.965885376346016,
+    "rho_warmth": 0.06110519634674114,
+    "r_competence": 0.054017595579871694,
+    "p_competence": 0.6666348928683631,
+    "rho_competence": 0.02035511866360693,
+    "procrustes_disparity": 0.8451202276135646,
+    "procrustes_perm_p": 0.0,
+    "n_groups": 66
+  },
+  "probe_B": {
+    "encoder": "DINOv2 axis-free",
+    "quadrant_accuracy_mean": 0.4406593406593407,
+    "quadrant_accuracy_std": 0.13532109256142544,
+    "majority_baseline": 0.30303030303030304,
+    "warmth_sign_accuracy": 0.6351648351648352,
+    "competence_sign_accuracy": 0.5758241758241758
+  }
+}

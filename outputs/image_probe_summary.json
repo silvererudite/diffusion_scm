@@ -1,0 +1,31 @@
+{
+  "clipL": {
+    "name": "Probe A:  CLIP-L image + CLIP-L text axes",
+    "r_w": 0.005367056725566921,
+    "p_w": 0.965885376346016,
+    "rho_w": 0.06110519634674114,
+    "r_c": 0.054017595579871694,
+    "p_c": 0.6666348928683631,
+    "rho_c": 0.02035511866360693,
+    "procrustes_disparity": 0.8451202276135646,
+    "procrustes_perm_p": 0.0
+  },
+  "bigG": {
+    "name": "Probe B:  bigG image + bigG text axes",
+    "r_w": 0.4789504838270243,
+    "p_w": 4.7383721665857596e-05,
+    "rho_w": 0.4685705951495064,
+    "r_c": 0.3346327807622172,
+    "p_c": 0.006027438522465909,
+    "rho_c": 0.34401194393734874,
+    "procrustes_disparity": 0.821498443470264,
+    "procrustes_perm_p": 0.0
+  },
+  "dinov2_axis_free": {
+    "quadrant_accuracy_mean": 0.4406593406593407,
+    "quadrant_accuracy_std": 0.13532109256142544,
+    "majority_baseline": 0.30303030303030304,
+    "warmth_sign_accuracy": 0.6351648351648352,
+    "competence_sign_accuracy": 0.5758241758241758
+  }
+}
