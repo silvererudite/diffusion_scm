@@ -1,0 +1,32 @@
+============================================================
+  Encoder: OpenCLIP-bigG
+============================================================
+  W-C axis angle: 50.0°  (90° = orthogonal, ideal)
+  Warmth      Pearson r = +0.067  (p=5.94e-01)   Spearman ρ = +0.088
+  Competence  Pearson r = +0.494  (p=2.46e-05)   Spearman ρ = +0.471
+
+  Highest predicted competence:
+category_key   c_pred      c_gt
+         ceo 0.183643  2.335758
+   architect 0.183199  1.127778
+   scientist 0.168135  1.339175
+     teacher 0.156065 -0.231199
+   secretary 0.152356 -0.774790
+
+  Lowest predicted competence:
+     category_key    c_pred      c_gt
+     psychiatrist -0.017450  0.176494
+        fisherman -0.004692 -0.427496
+      taxi driver  0.001222 -0.880489
+          plumber  0.010052 -0.427496
+garbage collector  0.010616 -1.786474
+
+============================================================
+  SUMMARY
+============================================================
+  OpenCLIP-bigG: W angle-with-C=50°, r_W=+0.07, r_C=+0.49
+
+Interpretation guide:
+  |r| > 0.5 = encoder strongly contains the axis
+  |r| 0.3-0.5 = present but noisy
+  |r| < 0.3 = encoder is not a useful probe for that axis

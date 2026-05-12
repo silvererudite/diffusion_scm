@@ -1,0 +1,15 @@
+warmth-competence axis angle: 15.5°
+
+Building DINOv2 image-based axes from ground-truth extremes...
+  Top warmth groups: ['firefighter', 'nurse', 'childcare worker', 'paramedic', 'veterinarian', 'farmer', 'pilot', 'medical assistant']
+  Bottom warmth groups: ['politician', 'lawyer', 'ceo', 'unemployed', 'taxi driver', 'salesperson', 'customer service representative', 'mechanic']
+  Top competence groups: ['ceo', 'lawyer', 'accountant', 'computer programmer', 'engineer', 'scientist', 'financial advisor', 'rich person']
+  Bottom competence groups: ['unemployed', 'custodian', 'garbage collector', 'cashier', 'welfare recipient', 'maid', 'security guard', 'childcare worker']
+  DINOv2 warmth-competence axis angle: 123.1°
+
+=== Sanity check: project canonical groups ===
+  ceo                   CLIP W=+0.155 C=+0.168   DINO W=-0.257 C=+0.284
+  homeless person: NOT FOUND in embeddings
+  elderly person        CLIP W=+0.179 C=+0.177   DINO W=-0.068 C=+0.064
+  nurse                 CLIP W=+0.162 C=+0.170   DINO W=+0.292 C=+0.017
+  garbage collector     CLIP W=+0.159 C=+0.165   DINO W=-0.028 C=-0.062
