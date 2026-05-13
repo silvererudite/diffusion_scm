@@ -1,0 +1,30 @@
+PGM Analyses Summary
+==================================================
+
+Bayesian measurement-error regression
+--------------------------------------------------
+WARMTH:
+  beta:  +0.476  94% HDI [+0.257, +0.691]  P(>0)=1.000
+  alpha: +0.027  94% HDI [-0.180, +0.236]
+  tau:   +0.873  94% HDI [+0.738, +1.037]
+
+COMPETENCE:
+  beta:  +0.324  94% HDI [+0.098, +0.550]  P(>0)=0.997
+  alpha: +0.034  94% HDI [-0.189, +0.259]
+  tau:   +0.921  94% HDI [+0.779, +1.094]
+
+Per-quadrant KL (symmetric)
+--------------------------------------------------
+  envy         (n=18):  KL = 3.509
+  admiration   (n=20):  KL = 1.913
+  paternalism  (n=12):  KL = 1.659
+  contempt     (n=16):  KL = 0.678
+
+Procrustes disparity: 0.8132
+
+Top 5 worst-fit groups:
+  ceo                        residual=0.255  (envy)
+  lawyer                     residual=0.246  (envy)
+  customer service representative  residual=0.221  (contempt)
+  firefighter                residual=0.189  (admiration)
+  cashier                    residual=0.183  (contempt)
