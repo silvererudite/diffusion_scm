@@ -104,7 +104,7 @@ for i in range(len(group_keys)):
     w_e, h_e = 2 * np.sqrt(vals)
     # Place ellipse at (competence, warmth)
     e = Ellipse((mu_z_c[i], mu_z_w[i]), w_e, h_e, angle=angle,
-                facecolor=color, edgecolor=color, alpha=0.12, linewidth=0.5)
+                facecolor=color, edgecolor=color, alpha=0.05, linewidth=0.5)
     ax.add_patch(e)
     ax.scatter(mu_z_c[i], mu_z_w[i], s=22, color=color, edgecolor="white",
                linewidths=0.5, zorder=5)
