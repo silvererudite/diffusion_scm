@@ -75,27 +75,38 @@ mu_z_c = (mu[:, 1] - mu[:, 1].mean()) / mu[:, 1].std()
 # -----------------------------------------------------------
 fig, ax = plt.subplots(figsize=(7.5, 7.5))
 # Quadrant background shading (subtle)
+# x-axis = competence, y-axis = warmth (Fiske convention)
 ax.axhline(0, color="black", lw=0.5, alpha=0.4)
 ax.axvline(0, color="black", lw=0.5, alpha=0.4)
-ax.text(-1.8,  1.8, "Envy",        color=QUAD_COLORS[1], alpha=1.0, fontsize=11, style="italic", weight="bold")
-ax.text( 1.0,  1.8, "Admiration",  color=QUAD_COLORS[3], alpha=1.0, fontsize=11, style="italic", weight="bold")
-ax.text(-1.8, -1.9, "Contempt",    color=QUAD_COLORS[0], alpha=1.0, fontsize=11, style="italic", weight="bold")
-ax.text( 1.0, -1.9, "Paternalism", color=QUAD_COLORS[2], alpha=1.0, fontsize=11, style="italic", weight="bold")
+# Corners:
+#   high W, low  C = top-left    -> Paternalism
+#   high W, high C = top-right   -> Admiration
+#   low  W, low  C = bottom-left -> Contempt
+#   low  W, high C = bottom-right -> Envy
+ax.text(-2.7,  1.8, "Paternalism", color=QUAD_COLORS[2], alpha=1.0, fontsize=11, style="italic", weight="bold")
+ax.text( 1.5,  1.8, "Admiration",  color=QUAD_COLORS[3], alpha=1.0, fontsize=11, style="italic", weight="bold")
+ax.text(-2.7, -1.9, "Contempt",    color=QUAD_COLORS[0], alpha=1.0, fontsize=11, style="italic", weight="bold")
+ax.text( 1.5, -1.9, "Envy",        color=QUAD_COLORS[1], alpha=1.0, fontsize=11, style="italic", weight="bold")
 
-# Compute z-scored sigma in the same space we plotted mu_z
+# Compute z-scored sigma in the same space we plotted mu_z.
+# Ellipse axis order: width = x-axis (competence), height = y-axis (warmth)
 sigma_scale = np.array([mu[:, 0].std(), mu[:, 1].std()])
 for i in range(len(group_keys)):
     color = QUAD_COLORS[int(quad[i])]
     # Rescale per-image-projection covariance to the z-scored plotting space
     S = sigma[i] / np.outer(sigma_scale, sigma_scale)
-    # 1-sigma ellipse from eigendecomposition
-    vals, vecs = np.linalg.eigh(S)
+    # S is indexed [w, c]; we plot with c on x and w on y, so swap rows/cols
+    # to get covariance in (c, w) order before eigendecomposition.
+    S_xy = np.array([[S[1, 1], S[1, 0]],
+                     [S[0, 1], S[0, 0]]])
+    vals, vecs = np.linalg.eigh(S_xy)
     angle = np.degrees(np.arctan2(vecs[1, -1], vecs[0, -1]))
     w_e, h_e = 2 * np.sqrt(vals)
-    e = Ellipse((mu_z_w[i], mu_z_c[i]), w_e, h_e, angle=angle,
-                facecolor=color, edgecolor=color, alpha=0.05, linewidth=0.5)
+    # Place ellipse at (competence, warmth)
+    e = Ellipse((mu_z_c[i], mu_z_w[i]), w_e, h_e, angle=angle,
+                facecolor=color, edgecolor=color, alpha=0.12, linewidth=0.5)
     ax.add_patch(e)
-    ax.scatter(mu_z_w[i], mu_z_c[i], s=22, color=color, edgecolor="white",
+    ax.scatter(mu_z_c[i], mu_z_w[i], s=22, color=color, edgecolor="white",
                linewidths=0.5, zorder=5)
 
 # Label a curated subset of groups (extremes + a few middle anchors)
@@ -107,12 +118,12 @@ to_label.update(["nurse", "ceo", "lawyer", "garbage collector", "welfare recipie
 
 for i, key in enumerate(group_keys):
     if key in to_label:
-        ax.annotate(str(key), (mu_z_w[i], mu_z_c[i]),
+        ax.annotate(str(key), (mu_z_c[i], mu_z_w[i]),
                     xytext=(4, 4), textcoords="offset points",
                     fontsize=7.5, color="black")
 
-ax.set_xlabel("Warmth  (z-scored, bigG image-axis projection)")
-ax.set_ylabel("Competence  (z-scored, bigG image-axis projection)")
+ax.set_xlabel("Competence  (z-scored, bigG image-axis projection)")
+ax.set_ylabel("Warmth  (z-scored, bigG image-axis projection)")
 ax.set_title("SD3-medium's internalized SCM map (66 groups, bigG image space)")
 ax.set_xlim(-3, 3); ax.set_ylim(-3, 3)
 ax.set_aspect("equal")
@@ -127,12 +138,12 @@ plt.close()
 
 # -----------------------------------------------------------
 # Figure 2: Procrustes alignment side-by-side
+# Convention matches Figure 1: competence on x, warmth on y
 # -----------------------------------------------------------
-model_xy = np.stack([mu_z_w, mu_z_c], axis=1)
-human_xy = np.stack([w_gt, c_gt], axis=1)
+# Stack as (competence, warmth) so x=index 0, y=index 1
+model_xy = np.stack([mu_z_c, mu_z_w], axis=1)
+human_xy = np.stack([c_gt, w_gt], axis=1)
 m_aligned, h_aligned, disp = procrustes(human_xy, model_xy)
-# Note: procrustes returns mat1 (human) and mat2 (model) both standardized.
-# To plot model in the human frame, we want the second output aligned to the first.
 
 fig, axes = plt.subplots(1, 2, figsize=(11, 5.5), sharex=True, sharey=True)
 for ax, xy, title in [(axes[0], human_xy, "Human ratings"),
@@ -142,10 +153,10 @@ for ax, xy, title in [(axes[0], human_xy, "Human ratings"),
     for i in range(len(group_keys)):
         ax.scatter(xy[i, 0], xy[i, 1], color=QUAD_COLORS[int(quad[i])],
                    s=22, edgecolor="white", linewidths=0.5)
-    ax.set_xlabel("Warmth")
+    ax.set_xlabel("Competence")
     ax.set_title(title)
     ax.set_aspect("equal")
-axes[0].set_ylabel("Competence")
+axes[0].set_ylabel("Warmth")
 
 fig.suptitle(f"Group locations in human-rated vs SD3-recovered SCM space  "
              f"(Procrustes disparity = {disp:.3f})", y=1.02)
